@@ -1,6 +1,11 @@
 ** The first three manipulations all use the antimicrobial.csv but for the purposes of ease I import the dataset afresh each time.  **
 ** The following two manipulation use the line.csv but again I import the dataset afresh each time **
 
+**These opening 5 Manipulations are used to generate summary statistics about the overall OPAT service**
+
+
+** The last 3 merge different datasets to make a demograpics/referral CSV and a clinical data CSV**
+
 **Manipulation 1: Antibiotic Days for each Drug **
 
 ** Import Data and drop non-OPAT drugs **
@@ -78,11 +83,10 @@ local c_time = c(current_time)
 local c_time_date = "`c_date'"+"_" +"`c_time'"
 local time_string = subinstr("`c_time_date'", ":", "_", .)
 local time_string = subinstr("`time_string'", " ", "_", .)
-export delimited "individual_patient_antibiotic_delivered_by_`time_string'.csv
-
+**This command can be used to generate this for each individual patient as opposed to a summary for the service**
+**export delimited "individual_patient_antibiotic_delivered_by_`time_string'.csv**
 collapse (sum) carer (sum) DN (sum) GP (sum) OPAT (sum) Self (sum) UCLHatHome (sum) local_hospital
 export delimited "summary_antibiotic_delivered_by_`time_string'.csv
-
 
 ** Uncollapse the dataset **
 restore
@@ -200,7 +204,127 @@ export delimited "average_duration_line_type_`time_string'.csv
 ** Uncollapse the dataset **
 restore
 
-**Where do our patients come from**
+**Manipulation 6: Lets make a spreadsheet with some demographics and stuff in it**
+**First get gender, DOB from demographics**
+clear
+set more off
+import delimited "demographics.csv",varname(1) bindquotes(strict)
+drop 	created	updated	created_by_id	updated_by_id		ethnicity		country_of_birth_fk_id	country_of_birth_ft	country_of_birth
+tempfile tempfile1
+save `tempfile1'
+**Then get date and route of referral from location**
+clear
+import delimited "location.csv",varname(1) bindquotes(strict)
+merge 1:1 episode_id using `tempfile1'
+rename _merge location_data
+drop created updated created_by_id updated_by_id category hospital ward bed opat_referral_route opat_referral_team_address opat_acceptance opat_discharge
+tempfile tempfile2`
+save `tempfile2'
+**Identify people who were rejected from opat**
+clear
+import delimited "opat_rejection.csv", varname(1) bindquotes(strict)
+drop created updated created_by_id updated_by_id decided_by patient_choice oral_available not_needed patient_suitability not_fit_for_discharge non_complex_infection no_social_support reason date
+gen rejected = 1
+tempfile tempfile3
+save `tempfile3'
+**Merge these together**
+clear
+use `tempfile2'
+merge 1:1 episode_id using `tempfile3'
+drop _merge location_data
+*Work out an age**
+gen dob = date(date_of_birth,"YMD")
+gen refer_date = date(opat_referral,"YMD")
+gen age = (refer_date - dob)/365
+drop date_of_birth opat_referral
+format dob refer_date %td
+**Lets Call that a set of data**
+local c_date = c(current_date)
+local c_time = c(current_time)
+local c_time_date = "`c_date'"+"_" +"`c_time'"
+local time_string = subinstr("`c_time_date'", ":", "_", .)
+local time_string = subinstr("`time_string'", " ", "_", .)
+export delimited "demographics_`time_string'.csv
+tempfile tempfile99
+save `tempfile99'
 
 
+**Manipulation 7: Lets make a spreadsheet with some clinical data including Diagnosis, PID, PMH, MRSA**
+**Make a list of the Primary Infective Diagnoses - we will take the most recent entry for this for each episode*
+clear
+import delimited "opat_outcome.csv", varname(1) bindquotes(strict)
+*get rid of entries mssing a Primary Infective Diagnosis*
+drop if infective_diagnosis ==""
+*work out which one is the most recent*
+replace created = updated if created =="None"
+sort episode_id created
+by episode_id: gen n=_n
+drop if n!=1
+drop created updated created_by_id updated_by_id outcome_stage treatment_outcome patient_outcome opat_outcome deceased death_category cause_of_death readmitted readmission_cause notes patient_feedback infective_diagnosis_fk_id infective_diagnosis_ft n
+rename infective_diagnosis primary_infective_diagnosis
+tempfile tempfile1
+save `tempfile1'
+**Pull in Diagnoses and Make these Wide**
+clear
+import delimited "diagnosis.csv", varname(1) bindquotes(strict)
+drop created updated created_by_id updated_by_id provisional details date_of_diagnosis condition_fk_id condition_ft
+bysort episode_id: gen n=_n
+rename condition diagnosis
+reshape wide diagnosis, i(episode_id) j(n)
+tempfile tempfile2
+save `tempfile2'
+**Pull in PMH and Make these Wide**
+clear
+import delimited "past_medical_history.csv", varname(1) bindquotes(strict)
+drop created created_by_id updated updated_by_id year details condition_fk_id condition_ft
+rename condition pmh
+bysort episode_id: gen n=_n
+reshape wide pmh, i(episode_id) j(n)
+tempfile tempfile3
+save `tempfile3'
+**Lets work out peoples MRSA status**
+clear
+import delimited "microbiology_test", varname(1) bindquotes(strict)
+drop created updated created_by_id updated_by_id alert_investigation details microscopy organism sensitive_antibiotics resistant_antibiotics igm igg vca_igm vca_igg ebna_igg hbsag anti_hbs anti_hbcore_igm rpr anti_hbcore_igg tppa viral_load parasitaemia hsv vzv syphilis c_difficile_antigen c_difficile_toxin species hsv_1 hsv_2 enterovirus cmv ebv influenza_a influenza_b parainfluenza metapneumovirus rsv adenovirus norovirus rotavirus giardia entamoeba_histolytica cryptosporidium spotted_fever_igm spotted_fever_igg typhus_group_igm typhus_group_igg scrub_typhus_igm scrub_typhus_igg hiv_declined_fk_id hiv_declined_ft hiv_declined
+gen MRSA = 0
+replace MRSA = 1 if test=="MRAP"
+replace MRSA = 1 if test=="MRSA PCR"
+drop if MRSA==0
+drop MRSA
+sort episode_id date_ordered
+by episode_id: gen n=_n
+reshape wide test date_ordered result,i(episode_id) j(n)
+tempfile tempfile4
+save `tempfile4'
+*Merge these sets together*
+clear
+use `tempfile1'
+merge 1:1 episode_id using `tempfile2'
+drop _merge
+merge 1:1 episode_id using `tempfile3'
+drop _merge
+merge 1:1 episode_id using `tempfile4'
+drop _merge
+**Lets Call that a set of data**
+local c_date = c(current_date)
+local c_time = c(current_time)
+local c_time_date = "`c_date'"+"_" +"`c_time'"
+local time_string = subinstr("`c_time_date'", ":", "_", .)
+local time_string = subinstr("`time_string'", " ", "_", .)
+export delimited "clinical_data_`time_string'.csv
 
+**Manipulation 8: Lets make a spreadsheet about people lines**
+clear
+import delimited "line.csv", varname(1) bindquotes(strict)
+drop created updated created_by_id updated_by_id complications_ft complications_fk_id line_type_ft line_type_fk_id removal_reason_ft removal_reason_fk_id site_ft site_fk_id special_instructions external_length
+*The data is long so lets make it wide*
+sort episode_id insertion_datetime
+by episode_id: gen n=_n
+reshape wide insertion_datetime inserted_by removal_datetime site removal_reason line_type complications, i(episode_id)j(n)
+**Lets Call that a set of data**
+local c_date = c(current_date)
+local c_time = c(current_time)
+local c_time_date = "`c_date'"+"_" +"`c_time'"
+local time_string = subinstr("`c_time_date'", ":", "_", .)
+local time_string = subinstr("`time_string'", " ", "_", .)
+export delimited "patient_line_data_`time_string'.csv
