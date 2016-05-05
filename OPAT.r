@@ -12,8 +12,14 @@ library(dplyr)
 library(plyr)
 library(data.table)
 library(doBy)
+
+
+#### 1. The first set of manipulations in section 1 generate data of value several times over the course of the NORS reporting experience####
+
 ###Set a working Directory##
 setwd(dir = "/Users/Michael/Dropbox/Work/HTD Database/elCID Data Analysis/OPAT May 2016/" )
+
+#### 1.1: Making a set of drugs used in OPAT ####
 
 ###Find drugs administered by OPAT###
 drugs <- read.csv(file = "antimicrobial.csv" , header = TRUE,sep = ",")
@@ -25,6 +31,7 @@ drugs$start <- as.Date(drugs$start_date)
 drugs$end <- as.Date(drugs$end_date)
 drugs$duration <- drugs$end - drugs$start
 
+#### 1.2 Getting Data on Outcomes at end of IV Therapy ####
 ###Lets Make some cleaned up PID Data###
 setwd(dir = "/Users/Michael/Dropbox/Work/HTD Database/elCID Data Analysis/OPAT May 2016/" )
 PID <- read.csv(file = "opat_outcome.csv" , header = TRUE,sep = ",")
@@ -48,6 +55,16 @@ PID <- arrange(PID, episode_id, created)
 PID$n <- with(PID, ave(episode_id,episode_id,FUN = seq_along))
 PID <- subset(PID, PID$n==1)  
 
+####1.3 In general we want to report by Quarter####
+
+###We want to report data by quarters###
+PID$reportingperiod <- as.factor(PID$reportingperiod)
+
+##We divide the period of time up we are interested in
+period <- levels(PID$reportingperiod)
+numberperiods <- length(period)
+
+####2.1 The Aim of this Manipulation is to give the Number of days of each drug for each indication in each quarter####
 
 ####*Merge the PID Data to the Drugs*
 PID_Drugs <- merge(PID, drugs, by.x = "episode_id", by.y = "episode_id")
@@ -55,18 +72,17 @@ PID_Drugs <- merge(PID, drugs, by.x = "episode_id", by.y = "episode_id")
 ###Summate the number of days per drug per diagnosis per quarter###
 PID_Drugs <- arrange(PID_Drugs, drug, infective_diagnosis,reportingperiod)
 PID_Drugs$totaldays <- ave (PID_Drugs$duration,PID_Drugs$drug, PID_Drugs$infective_diagnosis,PID_Drugs$reportingperiod,FUN = sum)
-setDT(PID_Drugs)[, count:=.N, by = .(drug, infective_diagnosis, reportingperiod)]
+setDT(PID_Drugs)[, count := uniqueN(episode_id), .(drug, infective_diagnosis, reportingperiod)]
 
-PID_Drugs$reportingperiod <- as.factor(PID_Drugs$reportingperiod)
+##Collapse this data down so we just have the summary data for NORS
+summarydata_drugs_indication <- summaryBy(duration + count ~ drug + infective_diagnosis + reportingperiod, FUN=c(max), data=PID_Drugs)
 
-period <- levels(PID_Drugs$reportingperiod)
-numberperiods <- length(period)
-
-summarydata <- summaryBy(duration + count ~ drug + infective_diagnosis + reportingperiod, FUN=c(max), data=PID_Drugs)
-
+###We output the data we want###
 for (i in 1:numberperiods){
   
-u <- data.frame(subset(summarydata,reportingperiod=period[i]))
-j <- paste("mydata",period[i],".csv")
+u <- data.frame(subset(summarydata_drugs_indication,reportingperiod==period[i]))
+j <- paste("drugs_by_indication_in_",period[i],".csv")
 write.table (u,j, sep=",")
 }
+
+####3.1 THIS WILL BE THE NEXT MANIPULATION HERE###
