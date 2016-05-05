@@ -1,12 +1,308 @@
-** The first three manipulations all use the antimicrobial.csv but for the purposes of ease I import the dataset afresh each time.  **
-** The following two manipulation use the line.csv but again I import the dataset afresh each time **
+*The purpose of this DO file is to make data for NORS Reporting*
+**It should generate  consistent results to the R commands **
 
-**These opening 5 Manipulations are used to generate summary statistics about the overall OPAT service**
+cd "/Users/Michael/Dropbox/Work/HTD Database/elCID Data Analysis/OPAT May 2016"
+**Meta Code**
+**Identify the reporting Period**
+clear 
+import delimited "opat_outcome.csv" ,varname(1) bindquotes(strict)
+gen time1 = substr(created,1,10)
+gen time2 = substr(updated,1,10)
+replace time1 = time2 if time1=="None" & time2!="None"
+gen year = substr(time1,1,4)
+gen month = substr(time1,6,2)
+drop time2 time1
+gen quarter = month
+destring quarter,replace
+recode quarter (1/3=1)(4/6=2)(7/9=3)(10/12=4)
+drop month
+egen reportingperiod = concat(year quarter),punct("-")
+drop if outcome_stage !="Completed Therapy"
+
+*The purpose of this DO file is to make data for NORS Reporting*
+
+cd "/Users/Michael/Dropbox/Work/HTD Database/elCID Data Analysis/OPAT May 2016"
 
 
-** The last 3 merge different datasets to make a demograpics/referral CSV and a clinical data CSV**
 
-**Manipulation 1: Antibiotic Days for each Drug **
+
+**DONE*****Manipulation 1: Antibiotic Days for each Drug by Primary Diagnosis**
+
+** Import Data and drop non-OPAT drugs **
+cd "/Users/Michael/Dropbox/Work/HTD Database/elCID Data Analysis/OPAT May 2016"
+clear
+import delimited "antimicrobial.csv",varname(1) bindquotes(strict)
+drop if delivered_by=="Inpatient Team"
+drop if delivered_by==""
+
+** Generate days per prescription **
+gen start = date(start_date,"YMD")
+gen end = date(end_date,"YMD")
+gen duration = end-start
+
+**Save this to a temporary file**
+tempfile tempfile1
+save `tempfile1'
+
+**Merge this against PID**
+clear 
+import delimited "opat_outcome.csv" ,varname(1) bindquotes(strict)
+gen time1 = substr(created,1,10)
+gen time2 = substr(updated,1,10)
+replace time1 = time2 if time1=="None" & time2!="None"
+gen year = substr(time1,1,4)
+gen month = substr(time1,6,2)
+drop time2 time1
+gen quarter = month
+destring quarter,replace
+recode quarter (1/3=1)(4/6=2)(7/9=3)(10/12=4)
+drop month
+egen reportingperiod = concat(year quarter),punct("-")
+drop if outcome_stage !="Completed Therapy"
+
+*this section is needed in case someone double-clicked save"
+sort episode_id created
+by episode_id: gen n=_n
+drop if n!=1 
+
+*Merge the PID Data to the Drugs*
+merge 1:m episode_id using `tempfile1'
+
+*drop data without an outcome or any IV therapy*
+drop if _merge!=3
+
+** Summate all the durations by drug **
+
+
+bysort drug infective_diagnosis reportingperiod: egen totaldays = sum(duration)
+bysort drug infective_diagnosis reportingperiod: egen no_episodes=count(episode_id)
+
+levelsof reportingperiod, local(levels)
+foreach l of local levels {
+preserve
+collapse (max)totaldays (max)no_episodes  if reportingperiod=="`l'", by(drug infective_diagnosis reportingperiod)
+export delimited antibiotic_days_per_drug_`l'.csv,replace
+restore
+}
+** The data table now lists each drug and the total number of days it was prescribed across the whole OPAT dataset **
+** Uncollapse the dataset **
+
+**DONE***Manipulation 2: Outcomes by Specialty and Infective Diagnosis**
+clear
+import delimited "opat_outcome.csv" ,varname(1) bindquotes(strict)
+gen time1 = substr(created,1,10)
+gen time2 = substr(updated,1,10)
+replace time1 = time2 if time1=="None" & time2!="None"
+gen year = substr(time1,1,4)
+gen month = substr(time1,6,2)
+drop time2 time1
+gen quarter = month
+destring quarter,replace
+recode quarter (1/3=1)(4/6=2)(7/9=3)(10/12=4)
+drop month
+egen reportingperiod = concat(year quarter),punct("-")
+drop if outcome_stage !="Completed Therapy"
+
+*this section is needed in case someone double-clicked save"
+sort episode_id created
+by episode_id: gen n=_n
+drop if n!=1 
+tempfile tempfile_outcome
+save `tempfile_outcome'
+
+**Find out who referred people and what the Infective Diagnosis was**
+clear
+import delimited "location.csv",varname(1) bindquotes(strict)
+merge 1:1 episode_id using `tempfile_outcome'
+drop if _merge!=3
+
+**Sum the number of each outcome type by Referring Team**
+bysort opat_referral_team patient_outcome reportingperiod: gen rtpo=_N
+label variable rtpo "Patient Outcome by Referring Team"
+bysort opat_referral_team opat_outcome reportingperiod: gen rtoo=_N
+label variable rtoo "OPAT Outcome by Referring Team"
+bysort infective_diagnosis patient_outcome reportingperiod: gen pidpo=_N
+label variable pidpo "Patient Outcome by Infective Diagnosis"
+bysort infective_diagnosis opat_outcome reportingperiod: gen pidoo=_N
+label variable pidoo "OPAT Outcome by Infective Diagnosis"
+
+levelsof reportingperiod, local(levels)
+foreach l of local levels {
+preserve
+collapse (max)rtpo if reportingperiod=="`l'", by(opat_referral_team patient_outcome reportingperiod)
+export delimited patient_outcomes_by_referral`l'.csv,replace
+restore
+preserve
+collapse (max)rtoo if reportingperiod=="`l'", by(opat_referral_team opat_outcome reportingperiod)
+export delimited opat_outcomes_by_referral`l'.csv,replace
+restore
+preserve
+collapse (max)pidpo if reportingperiod=="`l'", by(infective_diagnosis patient_outcome reportingperiod)
+export delimited patient_outcomes_by_diagnosis`l'.csv,replace
+restore
+preserve
+collapse (max)pidoo if reportingperiod=="`l'", by(infective_diagnosis opat_outcome reportingperiod)
+export delimited opat_outcomes_by_diagnosis`l'.csv,replace
+restore
+}
+
+
+**DONE****Manipulation 3: Work out what different adverse events we had for lines**
+
+**Get some data about the quarter**
+clear
+import delimited "opat_outcome.csv" ,varname(1) bindquotes(strict)
+gen time1 = substr(created,1,10)
+gen time2 = substr(updated,1,10)
+replace time1 = time2 if time1=="None" & time2!="None"
+gen year = substr(time1,1,4)
+gen month = substr(time1,6,2)
+drop time2 time1
+gen quarter = month
+destring quarter,replace
+recode quarter (1/3=1)(4/6=2)(7/9=3)(10/12=4)
+drop month
+egen reportingperiod = concat(year quarter),punct("-")
+drop if outcome_stage !="Completed Therapy"
+**Need this line in case of double-clicking**
+sort episode_id created
+by episode_id: gen n=_n
+drop if n!=1 
+tempfile tempfile1
+save `tempfile1'
+
+** Import Data **
+clear
+import delimited "line.csv",varname(1) bindquotes(strict)
+
+merge m:1 episode_id using `tempfile1'
+
+drop if _merge!=3
+bysort complications reportingperiod: gen N=_n
+
+levelsof reportingperiod, local(levels)
+foreach l of local levels {
+preserve
+collapse (max)N if reportingperiod=="`l'", by(complications reportingperiod)
+export delimited line_complications`l'.csv,replace
+restore
+}
+**DONE****Manipulation 4: Work out what different adverse events we had for IV Drugs**
+
+**Get Reporting Period**
+clear
+import delimited "opat_outcome.csv" ,varname(1) bindquotes(strict)
+gen time1 = substr(created,1,10)
+gen time2 = substr(updated,1,10)
+replace time1 = time2 if time1=="None" & time2!="None"
+gen year = substr(time1,1,4)
+gen month = substr(time1,6,2)
+drop time2 time1
+gen quarter = month
+destring quarter,replace
+recode quarter (1/3=1)(4/6=2)(7/9=3)(10/12=4)
+drop month
+egen reportingperiod = concat(year quarter),punct("-")
+drop if outcome_stage !="Completed Therapy"
+**Need this line in case of double-clicking**
+sort episode_id created
+by episode_id: gen n=_n
+drop if n!=1 
+tempfile tempfile1
+save `tempfile1'
+
+
+** Import Data **
+clear
+import delimited "antimicrobial.csv",varname(1) bindquotes(strict)
+drop if delivered_by=="Inpatient Team"
+drop if delivered_by==""
+drop if delivered_by=="in patient"
+replace delivered_by="Self" if delivered_by=="self"
+replace delivered_by ="Carer" if delivered_by=="Carer / DN"
+drop if route=="Oral"
+drop if route=="PO"
+
+**Merge Data**
+merge m:1 episode_id using `tempfile1'
+
+
+bysort adverse_event reportingperiod: gen N=_n
+levelsof reportingperiod, local(levels)
+foreach l of local levels {
+preserve
+collapse (max)N if reportingperiod=="`l'", by(adverse_event reportingperiod)
+export delimited drug_adverse_event_`l'.csv,replace
+restore
+}
+
+**Manipulation 5: Work out the total number of treatment days and episodes by PID**
+** Import Data and drop non-OPAT drugs **
+
+**Merge this against PID**
+clear 
+import delimited "opat_outcome.csv" ,varname(1) bindquotes(strict)
+gen time1 = substr(created,1,10)
+gen time2 = substr(updated,1,10)
+replace time1 = time2 if time1=="None" & time2!="None"
+gen year = substr(time1,1,4)
+gen month = substr(time1,6,2)
+drop time2 time1
+gen quarter = month
+destring quarter,replace
+recode quarter (1/3=1)(4/6=2)(7/9=3)(10/12=4)
+drop month
+egen reportingperiod = concat(year quarter),punct("-")
+drop if outcome_stage !="Completed Therapy"
+
+*this section is needed in case someone double-clicked save"
+sort episode_id created
+by episode_id: gen n=_n
+drop if n!=1 
+
+**Save this to a temporary file**
+tempfile tempfile1
+save `tempfile1'
+
+**Get the data we need**
+clear
+import delimited "antimicrobial.csv",varname(1) bindquotes(strict)
+drop if delivered_by=="Inpatient Team"
+drop if delivered_by==""
+drop if route=="Oral"
+drop if route=="PO"
+
+** Generate days per prescription **
+gen start = date(start_date,"YMD")
+gen end = date(end_date,"YMD")
+gen duration = end-start
+
+**Generate the total number of days per episode**
+bysort episode_id: egen totalduration=sum(duration)
+**Make it one entry per person**
+collapse (max)totalduration, by(episode_id)
+
+*Merge the PID Data to the Drugs*
+merge 1:1 episode_id using `tempfile1'
+
+*drop data without an outcome or any IV therapy*
+drop if _merge!=3
+
+*Count the number of episodes per Diagnosis*
+bysort infective_diagnosis reportingperiod: gen N=_N
+*Count the overall number of days of OPAT per diagnosis**
+bysort infective_diagnosis reportingperiod: egen overall_duration=sum(totalduration)
+
+**Generate the summary data for NORS**
+levelsof reportingperiod, local(levels)
+foreach l of local levels {
+preserve
+collapse (max)overall_duration (max)N if reportingperiod=="`l'", by(infective_diagnosis reportingperiod)
+export delimited overall_opat_duration_by_diagnosis`l'.csv,replace
+restore
+}
+
+**DONE*****Manipulation 7: Antibiotic Days by REFERRING TEAM**
 
 ** Import Data and drop non-OPAT drugs **
 clear
@@ -19,312 +315,118 @@ gen start = date(start_date,"YMD")
 gen end = date(end_date,"YMD")
 gen duration = end-start
 
-** Summate all the durations by drug **
-bysort drug: egen totaldays = sum(duration)
+**Save this to a temporary file**
+tempfile tempfile1
+save `tempfile1'
 
-** Collapse the data to give the summary for each drug - NOTE PRESERVE STEP**
+**Merge this to find people who finished that quarter**
+clear 
+import delimited "opat_outcome.csv" ,varname(1) bindquotes(strict)
+gen time1 = substr(created,1,10)
+gen time2 = substr(updated,1,10)
+replace time1 = time2 if time1=="None" & time2!="None"
+gen year = substr(time1,1,4)
+gen month = substr(time1,6,2)
+drop time2 time1
+gen quarter = month
+destring quarter,replace
+recode quarter (1/3=1)(4/6=2)(7/9=3)(10/12=4)
+drop month
+egen reportingperiod = concat(year quarter),punct("-")
+drop if outcome_stage !="Completed Therapy"
+
+*this section is needed in case someone double-clicked save"
+sort episode_id created
+by episode_id: gen n=_n
+drop if n!=1 
+
+*Merge the to outcome data to the Drugs*
+merge 1:m episode_id using `tempfile1'
+
+*drop data without an outcome or any IV therapy*
+drop if _merge!=3
+drop _merge
+tempfile tempfile2
+save `tempfile2'
+
+clear
+import delimited "location.csv",varname(1) bindquotes(strict)
+merge 1:m episode_id using `tempfile2'
+drop if _merge!=3
+
+
+** Summate all the durations by Referring Team **
+bysort  opat_referral_team reportingperiod: egen totaldays = sum(duration)
+bysort  opat_referral_team reportingperiod: gen no_episodes=_N
+levelsof reportingperiod, local(levels)
+foreach l of local levels {
 preserve
-collapse (max)totaldays, by(drug)
-local c_date = c(current_date)
-local c_time = c(current_time)
-local c_time_date = "`c_date'"+"_" +"`c_time'"
-local time_string = subinstr("`c_time_date'", ":", "_", .)
-local time_string = subinstr("`time_string'", " ", "_", .)
-export delimited antibiotic_days_per_drug_`time_string'.csv
-
-** The data table now lists each drug and the total number of days it was prescribed across the whole OPAT dataset **
-
-** Uncollapse the dataset **
+collapse (max)totaldays (max)no_episodes  if reportingperiod=="`l'", by(opat_referral_team reportingperiod)
+export delimited totalduration_by_referringteam_`l'.csv,replace
 restore
+}
 
-**Manipulation 2: Work out who was administering all the drugs for each person **
-
-** We are using the antimicrobial dataset **
+****Manipulation 8****
+** Import Data and drop non-OPAT drugs **
 clear
 import delimited "antimicrobial.csv",varname(1) bindquotes(strict)
-
-** Drop drugs prescribed by inpatient team / where the delivered by field is blank - these are thought to also be inpatient prescriptions **
 drop if delivered_by=="Inpatient Team"
 drop if delivered_by==""
 
-** Clean the delivered by data - this section needs reviewing based on a tab delivered_by. This will be fixed when Delivered_by becomes a dropdown not a lookup list **
-drop if delivered_by=="in patient"
-replace delivered_by="Self" if delivered_by=="self"
-replace delivered_by ="Carer" if delivered_by=="Carer / DN"
-
-** Data is currently long. We therefore look at each entry and generate a score of 1 for each category based on each individual prescription ** 
-gen carer =0
-replace carer =1 if strpos(delivered_by,"Carer")
-replace carer =1 if strpos(delivered_by,"Family / Carer")
-gen DN =0
-replace DN =1 if strpos(delivered_by,"District Nurse")
-gen GP =0
-replace GP =1 if strpos(delivered_by,"GP")
-replace GP =1 if strpos(delivered_by,"General Practioner")
-gen OPAT =0
-replace OPAT =1 if strpos(delivered_by,"OPAT Clinic")
-gen Self =0
-replace Self =1 if strpos(delivered_by,"Self")
-gen UCLHatHome =0
-replace UCLHatHome =1 if strpos(delivered_by,"UCLH@Home")
-gen local_hospital =0
-replace local_hospital =1 if strpos(delivered_by,"Local Hospital Day Unit")
-
-
-** We collapse the data across episode_id. This gives a score of 1 or 0 for each patient for each of the different ways they could have received drugs - e.g 1 if any of the prescriptions were delivered by a district nurse - Note the Preserve/Collapse step**
-
-preserve
-collapse (max) carer DN GP OPAT Self UCLHatHome local_hospital,by(episode_id)
-
-** Summate the different ways a person can receive drugs giving a score for total of number of different ways they received drugs **
-gen numberofways = carer + DN + GP + OPAT + Self + UCLHatHome + local_hospital
-local c_date = c(current_date)
-local c_time = c(current_time)
-local c_time_date = "`c_date'"+"_" +"`c_time'"
-local time_string = subinstr("`c_time_date'", ":", "_", .)
-local time_string = subinstr("`time_string'", " ", "_", .)
-**This command can be used to generate this for each individual patient as opposed to a summary for the service**
-**export delimited "individual_patient_antibiotic_delivered_by_`time_string'.csv**
-collapse (sum) carer (sum) DN (sum) GP (sum) OPAT (sum) Self (sum) UCLHatHome (sum) local_hospital
-export delimited "summary_antibiotic_delivered_by_`time_string'.csv
-
-** Uncollapse the dataset **
-restore
-
-**Manipulation 3: Work out how long patients received IV Abx via the OPAT service **
-
-** Import data **
-clear
-import delimited "antimicrobial.csv",varname(1) bindquotes(strict)
-** Remove non OPAT drugs **
-** Records where delivered by is blank are thought to be drugs imported from inpatient records where the route of administration isn't recorded **
-drop if delivered_by=="Inpatient Team"
-drop if delivered_by==""
-** Drop drugs where route of administration == Oral **
-drop if route=="Oral"
-drop if route=="PO"
-
-** convert the date strings in to dates **
+** Generate days per prescription **
 gen start = date(start_date,"YMD")
 gen end = date(end_date,"YMD")
 gen duration = end-start
-bysort episode_id: egen opat_duration = sum(duration)
 
-** Collapse data across episode_id keeping the maimum opat duration value. NOTE THE PRESERVE STEP**
-preserve
-collapse (max)opat_duration, by(episode_id)
-collapse (p50) median=opat_duration (mean) mean=opat_duration (iqr) iqr=opat_duration (min) minimum=opat_duration (max) maximum=opat_duration
-
-** Get summary statistics **
-local c_date = c(current_date)
-local c_time = c(current_time)
-local c_time_date = "`c_date'"+"_" +"`c_time'"
-local time_string = subinstr("`c_time_date'", ":", "_", .)
-local time_string = subinstr("`time_string'", " ", "_", .)
-export delimited "duration_opat.csv_`time_string'
-
-** Uncollapse the dataset **
-restore
-
-**Manipulation 4: Work out which lines people have used **
-
-** Import data** 
-clear 
-import delimited "line.csv",varname(1) bindquotes(strict)
-
-** Generate a 0/1 column for each type of catheter. This currently includes a few extra lines because the data is not perfectly clean. In the long term this will be fixed by making line type a drop down not a look-up list **
-
-gen hickman = 0
-replace hickman =1 if strpos(line_type,"Hickman")
-gen leaderflex = 0 
-replace leaderflex =1 if strpos(line_type,"Leader")
-replace leaderflex =1 if strpos(line_type,"leder")
-gen midline = 0 
-replace midline =1 if strpos(line_type,"Midline")
-gen PICC = 0 
-replace PICC =1 if strpos(line_type,"PICC")
-gen Peripheral = 0 
-replace Peripheral =1 if strpos(line_type,"Peripheral")
-gen Portacath = 0 
-replace Portacath =1 if strpos(line_type,"Portacath")
-
-** We are going to collapse the data by episode. This will give a score of 1 for each type of line the person used at any point across the episode. Note the collapse step therefore preserve is recommended. **
-preserve
-collapse (max) hickman leaderflex midline PICC Peripheral Portacath,by(episode_id)
-
-** Work out how many different types of line each person used **
-gen numberofways = hickman + leaderflex + midline + PICC + Peripheral + Portacath
-local c_date = c(current_date)
-local c_time = c(current_time)
-local c_time_date = "`c_date'"+"_" +"`c_time'"
-local time_string = subinstr("`c_time_date'", ":", "_", .)
-local time_string = subinstr("`time_string'", " ", "_", .)
-export delimited "line_types_used_per_person_`time_string'.csv
-
-collapse (sum) hickman (sum) leaderflex (sum) midline (sum) PICC (sum) Peripheral (sum) Portacath 
-export delimited "summary_types_of_line_`time_string'.csv
-
-** Uncollapse the dataset **
-restore
-
-**Manipulation 5: Work out how long each different line type was used on average across the dataset **
-
-** Import Data **
-clear
-import delimited "line.csv",varname(1) bindquotes(strict)
-tab line_type
-
-** This will be improved once we move line_type to==dropdown **
-**Tidy up Line-Type because of Free-Text**
-replace line_type ="Leaderflex" if strpos(line_type,"Leader")
-replace line_type ="Leaderflex" if strpos(line_type,"leder")
-replace line_type ="." if strpos(line_type,"removed")
-
-** Convert Date-Time to a STATA Date by extracting the data and then converting**
-gen inserted_on = substr(insertion_datetime,1,10)
-replace inserted_on = "." if inserted_on=="None"
-gen inserted_date = date(inserted_on,"YMD")
-gen removed_on = substr( removal_datetime,1,10)
-replace removed_on = "." if removed_on=="None"
-gen removed_date = date(removed_on,"YMD")
-gen line_duration = removed_date - inserted_date
-
-** Summarise the data by line type - NOTE PRESERVE STEP**
-preserve
-collapse (p50) median=line_duration (mean) mean=line_duration (iqr) iqr=line_duration  (min) minimum=line_duration (max) maximum=line_duration, by(line_type)
-
-** Data table now shows the summary statistics for line duration for each line type **
-local c_date = c(current_date)
-local c_time = c(current_time)
-local c_time_date = "`c_date'"+"_" +"`c_time'"
-local time_string = subinstr("`c_time_date'", ":", "_", .)
-local time_string = subinstr("`time_string'", " ", "_", .)
-export delimited "average_duration_line_type_`time_string'.csv
-
-** Uncollapse the dataset **
-restore
-
-**Manipulation 6: Lets make a spreadsheet with some demographics and stuff in it**
-**First get gender, DOB from demographics**
-clear
-set more off
-import delimited "demographics.csv",varname(1) bindquotes(strict)
-drop 	created	updated	created_by_id	updated_by_id		ethnicity		country_of_birth_fk_id	country_of_birth_ft	country_of_birth
+**Save this to a temporary file**
 tempfile tempfile1
 save `tempfile1'
-**Then get date and route of referral from location**
-clear
-import delimited "location.csv",varname(1) bindquotes(strict)
-merge 1:1 episode_id using `tempfile1'
-rename _merge location_data
-drop created updated created_by_id updated_by_id category hospital ward bed opat_referral_route opat_referral_team_address opat_acceptance opat_discharge
-tempfile tempfile2`
-save `tempfile2'
-**Identify people who were rejected from opat**
-clear
-import delimited "opat_rejection.csv", varname(1) bindquotes(strict)
-drop created updated created_by_id updated_by_id decided_by patient_choice oral_available not_needed patient_suitability not_fit_for_discharge non_complex_infection no_social_support reason date
-gen rejected = 1
-tempfile tempfile3
-save `tempfile3'
-**Merge these together**
-clear
-use `tempfile2'
-merge 1:1 episode_id using `tempfile3'
-drop _merge location_data
-*Work out an age**
-gen dob = date(date_of_birth,"YMD")
-gen refer_date = date(opat_referral,"YMD")
-gen age = (refer_date - dob)/365
-drop date_of_birth opat_referral
-format dob refer_date %td
-**Lets Call that a set of data**
-local c_date = c(current_date)
-local c_time = c(current_time)
-local c_time_date = "`c_date'"+"_" +"`c_time'"
-local time_string = subinstr("`c_time_date'", ":", "_", .)
-local time_string = subinstr("`time_string'", " ", "_", .)
-export delimited "demographics_`time_string'.csv
-tempfile tempfile99
-save `tempfile99'
 
+**Merge this against PID**
+clear 
+import delimited "opat_outcome.csv" ,varname(1) bindquotes(strict)
+gen time1 = substr(created,1,10)
+gen time2 = substr(updated,1,10)
+replace time1 = time2 if time1=="None" & time2!="None"
+gen year = substr(time1,1,4)
+gen month = substr(time1,6,2)
+drop time2 time1
+gen quarter = month
+destring quarter,replace
+recode quarter (1/3=1)(4/6=2)(7/9=3)(10/12=4)
+drop month
+egen reportingperiod = concat(year quarter),punct("-")
+drop if outcome_stage !="Completed Therapy"
 
-**Manipulation 7: Lets make a spreadsheet with some clinical data including Diagnosis, PID, PMH, MRSA**
-**Make a list of the Primary Infective Diagnoses - we will take the most recent entry for this for each episode*
-clear
-import delimited "opat_outcome.csv", varname(1) bindquotes(strict)
-*get rid of entries mssing a Primary Infective Diagnosis*
-drop if infective_diagnosis ==""
-*work out which one is the most recent*
-replace created = updated if created =="None"
+*this section is needed in case someone double-clicked save"
 sort episode_id created
 by episode_id: gen n=_n
-drop if n!=1
-drop created updated created_by_id updated_by_id outcome_stage treatment_outcome patient_outcome opat_outcome deceased death_category cause_of_death readmitted readmission_cause notes patient_feedback infective_diagnosis_fk_id infective_diagnosis_ft n
-rename infective_diagnosis primary_infective_diagnosis
-tempfile tempfile1
-save `tempfile1'
-**Pull in Diagnoses and Make these Wide**
-clear
-import delimited "diagnosis.csv", varname(1) bindquotes(strict)
-drop created updated created_by_id updated_by_id provisional details date_of_diagnosis condition_fk_id condition_ft
-bysort episode_id: gen n=_n
-rename condition diagnosis
-reshape wide diagnosis, i(episode_id) j(n)
-tempfile tempfile2
-save `tempfile2'
-**Pull in PMH and Make these Wide**
-clear
-import delimited "past_medical_history.csv", varname(1) bindquotes(strict)
-drop created created_by_id updated updated_by_id year details condition_fk_id condition_ft
-rename condition pmh
-bysort episode_id: gen n=_n
-reshape wide pmh, i(episode_id) j(n)
-tempfile tempfile3
-save `tempfile3'
-**Lets work out peoples MRSA status**
-clear
-import delimited "microbiology_test", varname(1) bindquotes(strict)
-drop created updated created_by_id updated_by_id alert_investigation details microscopy organism sensitive_antibiotics resistant_antibiotics igm igg vca_igm vca_igg ebna_igg hbsag anti_hbs anti_hbcore_igm rpr anti_hbcore_igg tppa viral_load parasitaemia hsv vzv syphilis c_difficile_antigen c_difficile_toxin species hsv_1 hsv_2 enterovirus cmv ebv influenza_a influenza_b parainfluenza metapneumovirus rsv adenovirus norovirus rotavirus giardia entamoeba_histolytica cryptosporidium spotted_fever_igm spotted_fever_igg typhus_group_igm typhus_group_igg scrub_typhus_igm scrub_typhus_igg hiv_declined_fk_id hiv_declined_ft hiv_declined
-gen MRSA = 0
-replace MRSA = 1 if test=="MRAP"
-replace MRSA = 1 if test=="MRSA PCR"
-drop if MRSA==0
-drop MRSA
-sort episode_id date_ordered
-by episode_id: gen n=_n
-reshape wide test date_ordered result,i(episode_id) j(n)
-tempfile tempfile4
-save `tempfile4'
-*Merge these sets together*
-clear
-use `tempfile1'
-merge 1:1 episode_id using `tempfile2'
-drop _merge
-merge 1:1 episode_id using `tempfile3'
-drop _merge
-merge 1:1 episode_id using `tempfile4'
-drop _merge
-**Lets Call that a set of data**
-local c_date = c(current_date)
-local c_time = c(current_time)
-local c_time_date = "`c_date'"+"_" +"`c_time'"
-local time_string = subinstr("`c_time_date'", ":", "_", .)
-local time_string = subinstr("`time_string'", " ", "_", .)
-export delimited "clinical_data_`time_string'.csv
+drop if n!=1 
 
-**Manipulation 8: Lets make a spreadsheet about people lines**
-clear
-import delimited "line.csv", varname(1) bindquotes(strict)
-drop created updated created_by_id updated_by_id complications_ft complications_fk_id line_type_ft line_type_fk_id removal_reason_ft removal_reason_fk_id site_ft site_fk_id special_instructions external_length
-*The data is long so lets make it wide*
-sort episode_id insertion_datetime
-by episode_id: gen n=_n
-reshape wide insertion_datetime inserted_by removal_datetime site removal_reason line_type complications, i(episode_id)j(n)
-**Lets Call that a set of data**
-local c_date = c(current_date)
-local c_time = c(current_time)
-local c_time_date = "`c_date'"+"_" +"`c_time'"
-local time_string = subinstr("`c_time_date'", ":", "_", .)
-local time_string = subinstr("`time_string'", " ", "_", .)
-export delimited "patient_line_data_`time_string'.csv
+*Merge the PID Data to the Drugs*
+merge 1:m episode_id using `tempfile1'
+
+*drop data without an outcome or any IV therapy*
+drop if _merge!=3
+drop if delivered_by=="Inpatient Team"
+drop if delivered_by==""
+drop if delivered_by=="in patient"
+replace delivered_by="Self" if delivered_by=="self"
+replace delivered_by ="Carer" if delivered_by=="Carer / DN"
+drop if route=="Oral"
+drop if route=="PO"
+
+** Summate all the durations by route of administration **
+
+
+bysort delivered_by reportingperiod: egen totaldays = sum(duration)
+bysort delivered_by reportingperiod: gen no_episodes=_N
+levelsof reportingperiod, local(levels)
+foreach l of local levels {
+preserve
+collapse (max)totaldays (max)no_episodes  if reportingperiod=="`l'", by(delivered_by  reportingperiod)
+export delimited antibiotic_days_by_route_`l'.csv,replace
+restore
+}
+*******
+
