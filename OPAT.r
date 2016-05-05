@@ -202,7 +202,7 @@ opat_days_PID <- summaryBy(count + totalopat ~ infective_diagnosis + reportingpe
 for (i in 1:numberperiods){
   
   u <- data.frame(subset(opat_days_PID,reportingperiod==period[i]))
-  j <- paste("opat_days_by_referrer_",period[i],".csv")
+  j <- paste("opat_days_by_PID_",period[i],".csv")
   write.table (u,j, sep=",")
 }
 
