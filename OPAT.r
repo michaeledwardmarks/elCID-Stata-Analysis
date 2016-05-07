@@ -357,4 +357,3 @@ for (i in 1:numqcquarters){
   j <- paste("QC_Checks_",qcquarter[i],".csv")
   write.table (u,j, sep=",")
 }
-
