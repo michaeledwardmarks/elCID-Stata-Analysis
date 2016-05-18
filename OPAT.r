@@ -1,4 +1,4 @@
-###OPAT NORS: This takes a data-output from the elCID OPAT Module and generates NORS compliant reporting data####
+####OPAT NORS: This takes a data-output from the elCID OPAT Module and generates NORS compliant reporting data####
 
 ####I have the following packages which are used code####
 ##install dependencies##
@@ -91,9 +91,8 @@ PID$rejected <-na.zero (PID$rejected)
 PID <- subset(PID,PID$rejected==0)
 
 ##Where the Diagnosis is Free Text call it Other##
-####LOOK AT THIS LINE####
-PID$infective_diagnosis[PID$infective_diagnosis_ft!=""] <- "Other - Free Text"
-
+levels(PID$infective_diagnosis) <- c(levels(PID$infective_diagnosis), "Other - Free Text")
+PID$infective_diagnosis[PID$infective_diagnosis_ft!=""] <- 'Other - Free Text'
 
 ###Only look at outcomes at end of IV Therapy as that is what NORS want###
 PID_clean <- subset(PID, outcome_stage=="Completed Therapy")
