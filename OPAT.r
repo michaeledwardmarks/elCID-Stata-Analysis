@@ -1,17 +1,17 @@
-####OPAT NORS: This takes a data-output from the elCID OPAT Module and generates NORS compliant reporting data####
+###OPAT NORS: This takes a data-output from the elCID OPAT Module and generates NORS compliant reporting data####
 
 ####I have the following packages which are used code####
 ##install dependencies##
 #install.packages("car")
 #install.packages("dplyr")
 #install.packages("doBy")
-
+#install.packages("ggplot2")
 #### 0.1 Turn on the packages we need ####
 library(dplyr)
 library(data.table)
 library(doBy)
 library(car)
-
+library(ggplot2)
 #### 1. The first set of manipulations in section 1 generate data of value several times over the course of the NORS reporting experience####
 
 ###Set a working Directory###
@@ -48,7 +48,7 @@ drugs$duration <-na.zero (drugs$duration)
 ###For any Episode we only want drugs prescribed in that episode###
 ###This is because when someone goes from Follow-Up back to IV we copy the drugs over to make it easier for the Clinical Team to see. But we only want drugs for this specific epsiode
 opat_acceptance <- referral[c("episode_id","opat_acceptance","opat_referral")]
-drugs <- merge(drugs,opat_acceptance, drugs, by.x = "episode_id", by.y = "episode_id")
+drugs <- merge(drugs,opat_acceptance, by.x = "episode_id", by.y = "episode_id")
 
 ###This line tells us the days between Acceptance and Starting a Drug###
 ###Minus Numbers and Zero are fine. They tell us the drug was started on/after the day that patient entered OPAT care###
@@ -90,13 +90,17 @@ PID <- merge(PID, rejected, by.x = "episode_id", by.y = "episode_id", all=TRUE)
 PID$rejected <-na.zero (PID$rejected)
 PID <- subset(PID,PID$rejected==0)
 
+##Where the Diagnosis is Free Text call it Other##
+####LOOK AT THIS LINE####
+PID$infective_diagnosis[PID$infective_diagnosis_ft!=""] <- "Other - Free Text"
+
+
 ###Only look at outcomes at end of IV Therapy as that is what NORS want###
 PID_clean <- subset(PID, outcome_stage=="Completed Therapy")
 
-####1.5 In general we want to report by Quarter####
-
 ###We want to report data by quarters###
 PID_clean$reportingperiod <- as.factor(PID_clean$reportingperiod)
+
 
 ##We divide the period of time up we are interested in
 period <- levels(PID_clean$reportingperiod)
@@ -125,39 +129,60 @@ write.table (u,j, sep=",")
 
 ####3.1 Patient Outcomes / OPAT Outcomes by Referrer and Infective Diagnosis####
 
-##Link it to the Reporting Period##
-nors_outcomes <-merge(PID, referral, by.x = "episode_id", by.y = "episode_id")
+##PO by Ref
+nors_outcomes_po_ref <-merge(PID_clean, referral, by.x = "episode_id", by.y = "episode_id")
+nors_outcomes_po_ref$opat_outcome <-NULL
+setDT(nors_outcomes_po_ref)[, count := .N, .(opat_referral_team, patient_outcome, reportingperiod)]
+nors_outcomes_po_ref <- summaryBy(count ~ opat_referral_team + patient_outcome + reportingperiod, FUN=c(max), data=nors_outcomes_po_ref)
 
-###We want to know the sum of each outcome type by Referring Team##
-setDT(nors_outcomes)[, count := .N, .(opat_referral_team, patient_outcome, reportingperiod)]
-nors_outcomes$rtpo <- nors_outcomes$count
-setDT(nors_outcomes)[, count := .N, .(opat_referral_team, opat_outcome, reportingperiod)]
-nors_outcomes$rtoo <- nors_outcomes$count
+##OO by Ref
+nors_outcomes_oo_ref <-merge(PID_clean, referral, by.x = "episode_id", by.y = "episode_id")
+nors_outcomes_oo_ref$patient_outcome <-NULL
+setDT(nors_outcomes_oo_ref)[, count := .N, .(opat_referral_team, opat_outcome, reportingperiod)]
+nors_outcomes_oo_ref <- summaryBy(count ~ opat_referral_team + opat_outcome + reportingperiod, FUN=c(max), data=nors_outcomes_oo_ref)
 
-###We want to know the sum of each outcome type by Infective Diagnosism##
-setDT(nors_outcomes)[, count := .N, .(infective_diagnosis, patient_outcome, reportingperiod)]
-nors_outcomes$pidpo <- nors_outcomes$count
-setDT(nors_outcomes)[, count := .N, .(infective_diagnosis, opat_outcome, reportingperiod)]
-nors_outcomes$pidoo <- nors_outcomes$count
 
-###Next we will want some kind of summary spreadsheet one for data by referring team and one for data by Primary Infective Diagnosis###
-summarydata_nors_outcomes_referrer <- summaryBy(rtpo + rtoo   ~ opat_referral_team + reportingperiod, FUN=c(max), data=nors_outcomes)
+##PO by PID
+nors_outcomes_po_pid <-merge(PID_clean, referral, by.x = "episode_id", by.y = "episode_id")
+nors_outcomes_po_pid$opat_outcome <-NULL
+setDT(nors_outcomes_po_pid)[, count := .N, .(infective_diagnosis, patient_outcome, reportingperiod)]
+nors_outcomes_po_pid <- summaryBy(count ~ infective_diagnosis + patient_outcome + reportingperiod, FUN=c(max), data=nors_outcomes_po_pid)
 
-summarydata_nors_outcomes_PID <- summaryBy(pidpo + pidoo   ~ infective_diagnosis + reportingperiod, FUN=c(max), data=nors_outcomes)
+##OO by PID
+nors_outcomes_oo_pid <-merge(PID_clean, referral, by.x = "episode_id", by.y = "episode_id")
+nors_outcomes_oo_pid$patient_outcome <-NULL
+setDT(nors_outcomes_oo_pid)[, count := .N, .(infective_diagnosis, opat_outcome, reportingperiod)]
+nors_outcomes_oo_pid <- summaryBy(count ~ infective_diagnosis + opat_outcome + reportingperiod, FUN=c(max), data=nors_outcomes_oo_pid)
 
 ###Now we export the referring team data###
-for (i in 1:numberperiods){
 
-u <- data.frame(subset(summarydata_nors_outcomes_referrer,reportingperiod==period[i]))
-j <- paste("outcomes_by_referrer_",period[i],".csv")
-write.table (u,j, sep=",")
+for (i in 1:numberperiods){
+  
+  u <- data.frame(subset(nors_outcomes_po_ref,reportingperiod==period[i]))
+  j <- paste("patient_outcomes_by_referrer_",period[i],".csv")
+  write.table (u,j, sep=",")
 }
+
+for (i in 1:numberperiods){
+  
+  u <- data.frame(subset(nors_outcomes_oo_ref,reportingperiod==period[i]))
+  j <- paste("opat_outcomes_by_referrer_",period[i],".csv")
+  write.table (u,j, sep=",")
+}
+
 ###Repeat for the Primary Infective Diagnosis Data###
 
 for (i in 1:numberperiods){
   
-  u <- data.frame(subset(summarydata_nors_outcomes_PID,reportingperiod==period[i]))
-  j <- paste("outcomes_by_diagnosis_",period[i],".csv")
+  u <- data.frame(subset(nors_outcomes_po_pid,reportingperiod==period[i]))
+  j <- paste("patient_outcomes_by_diagnosis_",period[i],".csv")
+  write.table (u,j, sep=",")
+}
+
+for (i in 1:numberperiods){
+  
+  u <- data.frame(subset(nors_outcomes_oo_pid,reportingperiod==period[i]))
+  j <- paste("opat_outcomes_by_diagnosis_",period[i],".csv")
   write.table (u,j, sep=",")
 }
 
@@ -357,3 +382,36 @@ for (i in 1:numqcquarters){
   j <- paste("QC_Checks_",qcquarter[i],".csv")
   write.table (u,j, sep=",")
 }
+
+
+####8 We want a Wide Summary Spreadsheet by Patient####
+
+##Make Drugs Wide and keep Drug, Delivered by, Start and End, Adjusted Duration, Adverse Events##
+drug_summary <- drugs_clean
+drug_summary <- arrange(drug_summary,episode_id, start_date)
+drug_summary$n <- with(drug_summary, ave(episode_id,episode_id,FUN = seq_along))
+
+drug_summary$created <- drug_summary$updated <- drug_summary$created_by_id <- drug_summary$updated_by_id <- drug_summary$comments <- drug_summary$no_antimicrobials <- drug_summary$route_fk_id <- drug_summary$route_ft <- drug_summary$drug_ft <- drug_summary$drug_fk_id <- drug_summary$frequency_fk_id <- drug_summary$frequency_fk_id <-drug_summary$delivered_by_fk_id <- drug_summary$delivered_by_ft <- drug_summary$adverse_event_fk_id <- drug_summary$adverse_event_ft <- drug_summary$reason_for_stopping_fk_id <- drug_summary$reason_for_stopping_ft <- drug_summary$start <- drug_summary$end <- drug_summary$opat_acceptance <- drug_summary$opat_referral <- drug_summary$previousepisodedrug <- drug_summary$beforeOPAT <- NULL
+
+drug_summary <- reshape(drug_summary,idvar="episode_id", timevar = "n" ,direction = "wide")
+
+
+
+outcome_summary <- PID
+outcome_summary <- arrange(outcome_summary,episode_id)
+outcome_summary$stage <- ifelse(outcome_summary$outcome_stage=="Completed Therapy",1,ifelse(outcome_summary$outcome_stage=="Completed Therapy Post Follow Up",2,ifelse(outcome_summary$outcome_stage=="OPAT Review",3,0)))
+
+outcome_summary <- reshape(outcome_summary,idvar="episode_id", timevar = "stage" ,direction = "wide")
+
+line_summary <- linedata
+line_summary <- arrange(line_summary,episode_id, insertion_datetime)
+line_summary$n <- with(line_summary, ave(episode_id,episode_id,FUN = seq_along))
+line_summary <- reshape(line_summary,idvar="episode_id", timevar = "n" ,direction = "wide")
+
+referred_summary <- qcperiod
+rejected_summary <- rejected
+
+pt_summary <- merge(drug_summary,outcome_summary, by.x = "episode_id", by.y = "episode_id", all=TRUE)
+pt_summary <- merge(pt_summary, line_summary, by.x = "episode_id", by.y = "episode_id", all=TRUE)
+pt_summary <- merge(pt_summary, referred_summary, by.x = "episode_id", by.y = "episode_id", all=TRUE)
+pt_summary <- merge(pt_summary, rejected_summary, by.x = "episode_id", by.y = "episode_id", all=TRUE)
