@@ -6,6 +6,7 @@
 #install.packages("dplyr")
 #install.packages("doBy")
 #install.packages("ggplot2")
+#install.packages("data.table")
 #### 0.1 Turn on the packages we need ####
 library(dplyr)
 library(data.table)
@@ -122,7 +123,7 @@ summarydata_drugs_indication <- summaryBy(duration + count ~ drug + infective_di
 for (i in 1:numberperiods){
   
 u <- data.frame(subset(summarydata_drugs_indication,reportingperiod==period[i]))
-j <- paste("drugs_by_indication_in_",period[i],".csv")
+j <- paste("Anti-infectives by PID and Episodes_",period[i],".csv")
 write.table (u,j, sep=",")
 }
 
@@ -255,7 +256,7 @@ opat_days_PID <- summaryBy(count + totalopat ~ infective_diagnosis + reportingpe
 for (i in 1:numberperiods){
   
   u <- data.frame(subset(opat_days_PID,reportingperiod==period[i]))
-  j <- paste("opat_days_by_PID_",period[i],".csv")
+  j <- paste("Primary Infective Diagnosis_Patient Episode_Treatment_Days_",period[i],".csv")
   write.table (u,j, sep=",")
 }
 
@@ -281,7 +282,7 @@ opat_days_referrer <- summaryBy(count + totalopat ~ opat_referral_team + reporti
 for (i in 1:numberperiods){
   
   u <- data.frame(subset(opat_days_PID,reportingperiod==period[i]))
-  j <- paste("opat_days_by_referrer_",period[i],".csv")
+  j <- paste("Referring Specialty_Patient Episode_Treatment_Days_",period[i],".csv")
   write.table (u,j, sep=",")
 }
 
@@ -390,27 +391,36 @@ drug_summary <- drugs_clean
 drug_summary <- arrange(drug_summary,episode_id, start_date)
 drug_summary$n <- with(drug_summary, ave(episode_id,episode_id,FUN = seq_along))
 
+#DROP STUFF BEFORE RESHAPING#
 drug_summary$created <- drug_summary$updated <- drug_summary$created_by_id <- drug_summary$updated_by_id <- drug_summary$comments <- drug_summary$no_antimicrobials <- drug_summary$route_fk_id <- drug_summary$route_ft <- drug_summary$drug_ft <- drug_summary$drug_fk_id <- drug_summary$frequency_fk_id <- drug_summary$frequency_fk_id <-drug_summary$delivered_by_fk_id <- drug_summary$delivered_by_ft <- drug_summary$adverse_event_fk_id <- drug_summary$adverse_event_ft <- drug_summary$reason_for_stopping_fk_id <- drug_summary$reason_for_stopping_ft <- drug_summary$start <- drug_summary$end <- drug_summary$opat_acceptance <- drug_summary$opat_referral <- drug_summary$previousepisodedrug <- drug_summary$beforeOPAT <- NULL
 
 drug_summary <- reshape(drug_summary,idvar="episode_id", timevar = "n" ,direction = "wide")
-
-
 
 outcome_summary <- PID
 outcome_summary <- arrange(outcome_summary,episode_id)
 outcome_summary$stage <- ifelse(outcome_summary$outcome_stage=="Completed Therapy",1,ifelse(outcome_summary$outcome_stage=="Completed Therapy Post Follow Up",2,ifelse(outcome_summary$outcome_stage=="OPAT Review",3,0)))
 
+#DROP STUFF BEFORE RESHAPING#
+outcome_summary$created.x <- outcome_summary$updated.x <- outcome_summary$deceased <- outcome_summary$death_category <- outcome_summary$cause_of_death <- outcome_summary$readmitted <- outcome_summary$readmission_cause <- outcome_summary$notes <- outcome_summary$patient_feedback <- outcome_summary$infective_diagnosis_fk_id <- outcome_summary$infective_diagnosis_ft <- outcome_summary$year <- outcome_summary$quarter <- outcome_summary$n <- outcome_summary$created.y <-outcome_summary$updated.y <-outcome_summary$created_by_id <-outcome_summary$updated_by_id <- outcome_summary$decided_by <- outcome_summary$patient_choice <- outcome_summary$oral_available <- outcome_summary$not_needed <- outcome_summary$patient_suitability <- outcome_summary$not_fit_for_discharge <- outcome_summary$non_complex_infection <- outcome_summary$no_social_support <- outcome_summary$reason <-outcome_summary$date <- outcome_summary$rejected <- NULL
+
 outcome_summary <- reshape(outcome_summary,idvar="episode_id", timevar = "stage" ,direction = "wide")
 
+#Drop some data before we reshape to wide#
 line_summary <- linedata
 line_summary <- arrange(line_summary,episode_id, insertion_datetime)
 line_summary$n <- with(line_summary, ave(episode_id,episode_id,FUN = seq_along))
+line_summary$created <- line_summary$updated <- line_summary$created_by_id <- line_summary$updated_by_id <- line_summary$inserted_by <- line_summary$external_length <- line_summary$special_instructions <- line_summary$site_fk_id <- line_summary$site_ft <- line_summary$removal_reason_fk_id <- line_summary$removal_reason_ft <- line_summary$line_type_fk_id <- line_summary$line_type_ft <- line_summary$complications_fk_id <- line_summary$complications_ft <- NULL
 line_summary <- reshape(line_summary,idvar="episode_id", timevar = "n" ,direction = "wide")
 
 referred_summary <- qcperiod
+referred_summary$year <- referred_summary$month <- referred_summary$quarter <- referred_summary$recent_quarter <- NULL
+
 rejected_summary <- rejected
+rejected_summary$created <- rejected_summary$updated <- rejected_summary$created_by_id <- rejected_summary$updated_by_id <- NULL
 
 pt_summary <- merge(drug_summary,outcome_summary, by.x = "episode_id", by.y = "episode_id", all=TRUE)
 pt_summary <- merge(pt_summary, line_summary, by.x = "episode_id", by.y = "episode_id", all=TRUE)
 pt_summary <- merge(pt_summary, referred_summary, by.x = "episode_id", by.y = "episode_id", all=TRUE)
 pt_summary <- merge(pt_summary, rejected_summary, by.x = "episode_id", by.y = "episode_id", all=TRUE)
+
+
