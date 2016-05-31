@@ -39,8 +39,18 @@ rejected$rejected <- 1
 
 ###Find drugs administered by OPAT###
 drugs <- read.csv(file = "antimicrobial.csv" , header = TRUE,sep = ",")
+
+##Get rid of non-OPAT drugs##
 drugs <- subset(drugs, delivered_by!="Inpatient Team")
 drugs <- subset(drugs, delivered_by!="")
+
+
+##Make a set of people who had at least 1 IV##
+drugs$iv <- ifelse (drugs$route=="IV", 1,0)
+drugs$anyiv <- ave(drugs$iv, drugs$episode_id, FUN=max)
+drugs <- arrange(drugs,episode_id)
+had_iv <- drugs
+had_iv <- summaryBy(anyiv  ~ episode_id, FUN=c(max), data=had_iv)
 
 ####Generate days per prescription - we add one day because we are doing inclusive counting###
 drugs$start <- as.Date(drugs$start_date, format = "%Y-%m-%d")
@@ -64,12 +74,10 @@ drugs$duration <- drugs$duration - drugs$beforeOPAT
 drugs$duration <- recode(drugs$duration,"lo:0=0")
 
 ###Get rid of any drugs where the Duration == 0 because they were not given in this Episode)
-
 drugs_clean <- subset(drugs, drugs$duration!=0)  
 
 #### 1.4 Getting Data on Outcomes at end of IV Therapy ####
 ###Lets Make some cleaned up PID Data###
-setwd(dir = "/Users/Michael/Desktop/OPAT NORS/" )
 PID <- read.csv(file = "opat_outcome.csv" , header = TRUE,sep = ",")
 
 ###Make a reporting period based on Year and Quarter###
@@ -100,9 +108,12 @@ PID$infective_diagnosis[PID$infective_diagnosis_ft!=""] <- 'Other - Free Text'
 ###Only look at outcomes at end of IV Therapy as that is what NORS want###
 PID_clean <- subset(PID, outcome_stage=="Completed Therapy")
 
+###Get rid of people who had no IV drugs at all in OPAT###
+PID_clean <- merge(PID_clean, had_iv, by.x = "episode_id", by.y = "episode_id")
+PID_clean <- subset(PID_clean, PID_clean$anyiv.max!=0)  
+
 ###We want to report data by quarters###
 PID_clean$reportingperiod <- as.factor(PID_clean$reportingperiod)
-
 
 ##We divide the period of time up we are interested in
 period <- levels(PID_clean$reportingperiod)
