@@ -16,7 +16,7 @@ library(ggplot2)
 #### 1. The first set of manipulations in section 1 generate data of value several times over the course of the NORS reporting experience####
 
 ###Set a working Directory###
-setwd(dir = "/Users/Michael/Dropbox/Work/HTD Database/elCID Data Analysis/OPAT May 2016/" )
+setwd(dir = "/Users/Michael/Desktop/OPAT NORS/" )
 
 ####Sometimes we need to fill NA gaps in duration with a 0 to make summation work####
 na.zero <- function (x) {
@@ -26,6 +26,8 @@ na.zero <- function (x) {
 
 #####1.1 The location file provides both start of OPAT-episode data and referring team####
 referral <- read.csv(file = "location.csv" , header = TRUE,sep = ",")
+referral$opat_acceptance <- format(as.Date(referral$opat_acceptance, format = "%d/%m/%Y"), "20%y-%m-%d")
+referral$opat_referral <- format(as.Date(referral$opat_referral, format = "%d/%m/%Y"), "20%y-%m-%d")
 referral$opat_acceptance <- as.Date(referral$opat_acceptance, format = "%Y-%m-%d")
 referral$opat_referral <- as.Date(referral$opat_referral, format = "%Y-%m-%d")
 
@@ -67,7 +69,7 @@ drugs_clean <- subset(drugs, drugs$duration!=0)
 
 #### 1.4 Getting Data on Outcomes at end of IV Therapy ####
 ###Lets Make some cleaned up PID Data###
-setwd(dir = "/Users/Michael/Dropbox/Work/HTD Database/elCID Data Analysis/OPAT May 2016/" )
+setwd(dir = "/Users/Michael/Desktop/OPAT NORS/" )
 PID <- read.csv(file = "opat_outcome.csv" , header = TRUE,sep = ",")
 
 ###Make a reporting period based on Year and Quarter###
@@ -114,6 +116,7 @@ PID_Drugs <- merge(PID_clean, drugs_clean, by.x = "episode_id", by.y = "episode_
 ###Summate the number of days per drug per diagnosis per quarter###
 PID_Drugs <- arrange(PID_Drugs, drug, infective_diagnosis,reportingperiod)
 PID_Drugs$totaldays <- ave (PID_Drugs$duration,PID_Drugs$drug, PID_Drugs$infective_diagnosis,PID_Drugs$reportingperiod,FUN = sum)
+
 setDT(PID_Drugs)[, count := uniqueN(episode_id), .(drug, infective_diagnosis, reportingperiod)]
 
 ##Collapse this data down so we just have the summary data for NORS
@@ -124,7 +127,7 @@ for (i in 1:numberperiods){
   
 u <- data.frame(subset(summarydata_drugs_indication,reportingperiod==period[i]))
 j <- paste("Anti-infectives by PID and Episodes_",period[i],".csv")
-write.table (u,j, sep=",")
+write.table (u,j, sep=",", row.names=FALSE)
 }
 
 ####3.1 Patient Outcomes / OPAT Outcomes by Referrer and Infective Diagnosis####
@@ -160,14 +163,14 @@ for (i in 1:numberperiods){
   
   u <- data.frame(subset(nors_outcomes_po_ref,reportingperiod==period[i]))
   j <- paste("patient_outcomes_by_referrer_",period[i],".csv")
-  write.table (u,j, sep=",")
+  write.table (u,j, sep=",", row.names=FALSE)
 }
 
 for (i in 1:numberperiods){
   
   u <- data.frame(subset(nors_outcomes_oo_ref,reportingperiod==period[i]))
   j <- paste("opat_outcomes_by_referrer_",period[i],".csv")
-  write.table (u,j, sep=",")
+  write.table (u,j, sep=",", row.names=FALSE)
 }
 
 ###Repeat for the Primary Infective Diagnosis Data###
@@ -176,14 +179,14 @@ for (i in 1:numberperiods){
   
   u <- data.frame(subset(nors_outcomes_po_pid,reportingperiod==period[i]))
   j <- paste("patient_outcomes_by_diagnosis_",period[i],".csv")
-  write.table (u,j, sep=",")
+  write.table (u,j, sep=",", row.names=FALSE)
 }
 
 for (i in 1:numberperiods){
   
   u <- data.frame(subset(nors_outcomes_oo_pid,reportingperiod==period[i]))
   j <- paste("opat_outcomes_by_diagnosis_",period[i],".csv")
-  write.table (u,j, sep=",")
+  write.table (u,j, sep=",", row.names=FALSE)
 }
 
 ####4.1 Work out the adverse line eventse####
@@ -191,6 +194,11 @@ linedata <- read.csv(file = "line.csv" , header = TRUE,sep = ",")
 
 ##Link it to a Reporting Period##
 line_adverse_data <- merge(PID_clean, linedata, by.x = "episode_id", by.y = "episode_id")
+
+##Where the adverse event is none make it blank##
+line_adverse_data$complications[line_adverse_data$complications=="None"] <- ""
+
+
 ##Count the number of each type of complication by period##
 setDT(line_adverse_data)[, count := .N, .(complications, reportingperiod)]
 
@@ -203,12 +211,16 @@ for (i in 1:numberperiods){
   
   u <- data.frame(subset(summarydata_line_adverse_data,reportingperiod==period[i]))
   j <- paste("line_adverse_events_",period[i],".csv")
-  write.table (u,j, sep=",")
+  write.table (u,j, sep=",", row.names=FALSE)
 }
 
 #####5.1 What adverse events did we have for drugs#####
 
 drugs_adverse_events <- merge(PID_clean, drugs_clean, by.x = "episode_id", by.y = "episode_id")
+
+##Where the adverse event is none make it blank##
+
+drugs_adverse_events$adverse_event[drugs_adverse_events$adverse_event=="None"] <- ""
 
 ##Count the number of each type of adverse event by period##
 setDT(drugs_adverse_events)[, count := .N, .(adverse_event, reportingperiod)]
@@ -222,11 +234,10 @@ for (i in 1:numberperiods){
   
   u <- data.frame(subset(summarydata_drug_adverse_data,reportingperiod==period[i]))
   j <- paste("drug_adverse_events_",period[i],".csv")
-  write.table (u,j, sep=",")
+  write.table (u,j, sep=",", row.names=FALSE)
 }
 
 ####6.1 Calculate the total number of IV treatment days and episodes by PID####
-
 iv_drugs <- drugs_clean
 iv_drugs <- subset(drugs,route!="Oral")
 iv_drugs <- subset(drugs,route!="PO")
@@ -257,7 +268,7 @@ for (i in 1:numberperiods){
   
   u <- data.frame(subset(opat_days_PID,reportingperiod==period[i]))
   j <- paste("Primary Infective Diagnosis_Patient Episode_Treatment_Days_",period[i],".csv")
-  write.table (u,j, sep=",")
+  write.table (u,j, sep=",", row.names=FALSE)
 }
 
 
@@ -283,7 +294,7 @@ for (i in 1:numberperiods){
   
   u <- data.frame(subset(opat_days_PID,reportingperiod==period[i]))
   j <- paste("Referring Specialty_Patient Episode_Treatment_Days_",period[i],".csv")
-  write.table (u,j, sep=",")
+  write.table (u,j, sep=",", row.names=FALSE)
 }
 
 ####7.1 We generate a spreadsheet which tells us how reasonable the assumptions underlying this spreadsheet####
@@ -380,7 +391,7 @@ for (i in 1:numqcquarters){
   
   u <- data.frame(subset(qcchecks,reportingperiod==qcquarter[i]))
   j <- paste("QC_Checks_",qcquarter[i],".csv")
-  write.table (u,j, sep=",")
+  write.table (u,j, sep=",", row.names=FALSE)
 }
 
 
