@@ -26,8 +26,6 @@ na.zero <- function (x) {
 
 #####1.1 The location file provides both start of OPAT-episode data and referring team####
 referral <- read.csv(file = "location.csv" , header = TRUE,sep = ",")
-referral$opat_acceptance <- format(as.Date(referral$opat_acceptance, format = "%d/%m/%Y"), "20%y-%m-%d")
-referral$opat_referral <- format(as.Date(referral$opat_referral, format = "%d/%m/%Y"), "20%y-%m-%d")
 referral$opat_acceptance <- as.Date(referral$opat_acceptance, format = "%Y-%m-%d")
 referral$opat_referral <- as.Date(referral$opat_referral, format = "%Y-%m-%d")
 
@@ -86,6 +84,7 @@ PID$time2 <- substring(PID$updated,1,10)
 PID$time1 <- ifelse (PID$time1=="None" & PID$time2!="None", PID$time2,PID$time1)
 PID$year <- substr(PID$time1,1,4)
 PID$month <- substr(PID$time1,start = 6,7)
+PID <- arrange(PID,time1)
 PID$quarter <- as.numeric(PID$month)
 PID$month <- PID$time1 <- PID$time2 <- PID$created_by_id <- PID$updated_by_id <- NULL
 PID$quarter <- recode(PID$quarter,"1:3=1;4:6=2;7:9=3;10:12=4")
@@ -107,6 +106,7 @@ PID$infective_diagnosis[PID$infective_diagnosis_ft!=""] <- 'Other - Free Text'
 
 ###Only look at outcomes at end of IV Therapy as that is what NORS want###
 PID_clean <- subset(PID, outcome_stage=="Completed Therapy")
+PID_clean <- arrange(PID_clean,time1)
 
 ###Get rid of people who had no IV drugs at all in OPAT###
 PID_clean <- merge(PID_clean, had_iv, by.x = "episode_id", by.y = "episode_id")
@@ -303,7 +303,7 @@ opat_days_referrer <- summaryBy(count + totalopat ~ opat_referral_team + reporti
 
 for (i in 1:numberperiods){
   
-  u <- data.frame(subset(opat_days_PID,reportingperiod==period[i]))
+  u <- data.frame(subset(opat_days_referrer,reportingperiod==period[i]))
   j <- paste("Referring Specialty_Patient Episode_Treatment_Days_",period[i],".csv")
   write.table (u,j, sep=",", row.names=FALSE)
 }
@@ -444,5 +444,3 @@ pt_summary <- merge(drug_summary,outcome_summary, by.x = "episode_id", by.y = "e
 pt_summary <- merge(pt_summary, line_summary, by.x = "episode_id", by.y = "episode_id", all=TRUE)
 pt_summary <- merge(pt_summary, referred_summary, by.x = "episode_id", by.y = "episode_id", all=TRUE)
 pt_summary <- merge(pt_summary, rejected_summary, by.x = "episode_id", by.y = "episode_id", all=TRUE)
-
-
