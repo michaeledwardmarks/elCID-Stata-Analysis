@@ -7,16 +7,19 @@
 #install.packages("doBy")
 #install.packages("ggplot2")
 #install.packages("data.table")
+#install.packages("plyr")
 #### 0.1 Turn on the packages we need ####
 library(dplyr)
 library(data.table)
 library(doBy)
 library(car)
 library(ggplot2)
+library(plyr)
+
 #### 1. The first set of manipulations in section 1 generate data of value several times over the course of the NORS reporting experience####
 
 ###Set a working Directory###
-setwd(dir = "/Users/Michael/Desktop/OPAT NORS/" )
+setwd(dir = "/Users/Michael/Dropbox/Work/HTD Database/elCID Data Analysis/OPAT NORS/")
 
 ####Sometimes we need to fill NA gaps in duration with a 0 to make summation work####
 na.zero <- function (x) {
@@ -308,7 +311,25 @@ for (i in 1:numberperiods){
   write.table (u,j, sep=",", row.names=FALSE)
 }
 
-####7.1 We generate a spreadsheet which tells us how reasonable the assumptions underlying this spreadsheet####
+#### 7.1 Count the number of people per quarter####
+people <- read.csv(file = "episodes.csv" , header = TRUE,sep = ",")
+people <- rename(people, c(id="episode_id"))
+people <- join(people, rejected, by = "episode_id", type = "left", match = "all")
+people$rejected <- na.zero (people$rejected)
+people <- subset(people, rejected!=1)
+people <- merge(people, PID_clean, by.x = "episode_id", by.y = "episode_id", all=TRUE)
+setDT(people)[, count := uniqueN(patient_id), .(reportingperiod)]
+people <- summaryBy(count ~ reportingperiod, FUN=c(max), data=people)
+
+for (i in 1:numberperiods){
+  
+  u <- data.frame(subset(people,reportingperiod==period[i]))
+  j <- paste("Number of patients per quarter",period[i],".csv")
+  write.table (u,j, sep=",", row.names=FALSE)
+}
+
+
+#### 8.1 We generate a spreadsheet which tells us how reasonable the assumptions underlying this spreadsheet####
 
 ##WE WANT DRUGS MISSING A START DATE, END DATE, FREE-TEXT ADVERSE EVENTS##
 missingdrugdata <- drugs
@@ -406,7 +427,7 @@ for (i in 1:numqcquarters){
 }
 
 
-####8 We want a Wide Summary Spreadsheet by Patient####
+####9.1 We want a Wide Summary Spreadsheet by Patient####
 
 ##Make Drugs Wide and keep Drug, Delivered by, Start and End, Adjusted Duration, Adverse Events##
 drug_summary <- drugs_clean
