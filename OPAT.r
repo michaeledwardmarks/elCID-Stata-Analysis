@@ -19,9 +19,10 @@ library(plyr)
 #### 1. The first set of manipulations in section 1 generate data of value several times over the course of the NORS reporting experience####
 
 ###Set a working Directory###
-setwd(dir = "/Users/Michael/Dropbox/Work/HTD Database/elCID Data Analysis/OPAT NORS/")
+setwd(dir = "/Users/Michael/Dropbox/Work/HTD Database/elCID Data Analysis/OPAT Data/")
 
 ####Sometimes we need to fill NA gaps in duration with a 0 to make summation work####
+
 na.zero <- function (x) {
   x[is.na(x)] <- 0
   return(x)
@@ -209,8 +210,8 @@ linedata <- read.csv(file = "line.csv" , header = TRUE,sep = ",")
 ##Link it to a Reporting Period##
 line_adverse_data <- merge(PID_clean, linedata, by.x = "episode_id", by.y = "episode_id")
 
-##Where the adverse event is none make it blank##
-line_adverse_data$complications[line_adverse_data$complications=="None"] <- ""
+##Where the adverse event is none make it say that##
+line_adverse_data$complications[line_adverse_data$complications==""] <- "None"
 
 
 ##Count the number of each type of complication by period##
@@ -234,7 +235,7 @@ drugs_adverse_events <- merge(PID_clean, drugs_clean, by.x = "episode_id", by.y 
 
 ##Where the adverse event is none make it blank##
 
-drugs_adverse_events$adverse_event[drugs_adverse_events$adverse_event=="None"] <- ""
+drugs_adverse_events$adverse_event[drugs_adverse_events$adverse_event==""] <- "None"
 
 ##Count the number of each type of adverse event by period##
 setDT(drugs_adverse_events)[, count := .N, .(adverse_event, reportingperiod)]
@@ -312,19 +313,24 @@ for (i in 1:numberperiods){
 }
 
 #### 7.1 Count the number of people per quarter####
-people <- read.csv(file = "episodes.csv" , header = TRUE,sep = ",")
-people <- rename(people, c(id="episode_id"))
-people <- join(people, rejected, by = "episode_id", type = "left", match = "all")
-people$rejected <- na.zero (people$rejected)
-people <- subset(people, rejected!=1)
-people <- merge(people, PID_clean, by.x = "episode_id", by.y = "episode_id", all=TRUE)
-setDT(people)[, count := uniqueN(patient_id), .(reportingperiod)]
-people <- summaryBy(count ~ reportingperiod, FUN=c(max), data=people)
+quartersummary <- read.csv(file = "episodes.csv" , header = TRUE,sep = ",")
+quartersummary <- rename(quartersummary, c(id="episode_id"))
+quartersummary <- join(quartersummary, rejected, by = "episode_id", type = "left", match = "all")
+quartersummary$rejected <- na.zero (quartersummary$rejected)
+quartersummary <- subset(quartersummary, rejected!=1)
+quartersummary <- merge(quartersummary, PID_clean, by.x = "episode_id", by.y = "episode_id", all=TRUE)
+#Count number of people and episodes per quarter#
+setDT(quartersummary)[, patients := uniqueN(patient_id), .(reportingperiod)]
+setDT(quartersummary)[, episodes := uniqueN(episode_id), .(reportingperiod)]
+quartersummary <- merge(quartersummary, iv_drugs_summary, by.x = "episode_id", by.y = "episode_id")
+quartersummary$treatmentdays <- ave (quartersummary$duration,quartersummary$reportingperiod,FUN = sum)
+
+quartersummary <- summaryBy(patients + episodes + treatmentdays ~ reportingperiod, FUN=c(max), data=quartersummary)
 
 for (i in 1:numberperiods){
   
-  u <- data.frame(subset(people,reportingperiod==period[i]))
-  j <- paste("Number of patients per quarter",period[i],".csv")
+  u <- data.frame(subset(quartersummary,reportingperiod==period[i]))
+  j <- paste("Summary statistics per quarter",period[i],".csv")
   write.table (u,j, sep=",", row.names=FALSE)
 }
 
@@ -465,3 +471,5 @@ pt_summary <- merge(drug_summary,outcome_summary, by.x = "episode_id", by.y = "e
 pt_summary <- merge(pt_summary, line_summary, by.x = "episode_id", by.y = "episode_id", all=TRUE)
 pt_summary <- merge(pt_summary, referred_summary, by.x = "episode_id", by.y = "episode_id", all=TRUE)
 pt_summary <- merge(pt_summary, rejected_summary, by.x = "episode_id", by.y = "episode_id", all=TRUE)
+
+
