@@ -286,11 +286,11 @@ for (i in 1:numberperiods){
   write.table (u,j, sep=",", row.names=FALSE)
 }
 
-
 ###Link the summary of overall OPAT Days per person to a Referrer Value###
 ##NB We need the PID data too because that has the Reporting Period In##
+
 iv_drugs_summary_referrer <- merge (referral, iv_drugs_summary, by.x = "episode_id", by.y = "episode_id")
-iv_drugs_summary_referrer <- merge (iv_drugs_summary_referrer, PID, by.x = "episode_id", by.y = "episode_id")
+iv_drugs_summary_referrer <- merge (iv_drugs_summary_referrer, PID_clean, by.x = "episode_id", by.y = "episode_id")
 
 iv_drugs_summary_referrer <- arrange(iv_drugs_summary_referrer, opat_referral_team, reportingperiod)
 
@@ -471,5 +471,4 @@ pt_summary <- merge(drug_summary,outcome_summary, by.x = "episode_id", by.y = "e
 pt_summary <- merge(pt_summary, line_summary, by.x = "episode_id", by.y = "episode_id", all=TRUE)
 pt_summary <- merge(pt_summary, referred_summary, by.x = "episode_id", by.y = "episode_id", all=TRUE)
 pt_summary <- merge(pt_summary, rejected_summary, by.x = "episode_id", by.y = "episode_id", all=TRUE)
-
 
