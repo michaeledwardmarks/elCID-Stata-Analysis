@@ -334,8 +334,24 @@ for (i in 1:numberperiods){
   write.table (u,j, sep=",", row.names=FALSE)
 }
 
+#### 8.1 We want to know who gives our drugs####
 
-#### 8.1 We generate a spreadsheet which tells us how reasonable the assumptions underlying this spreadsheet####
+administered  <- merge(iv_drugs, PID_clean, by.x = "episode_id", by.y = "episode_id", all=TRUE)
+
+setDT(administered)[, count := uniqueN(episode_id), .(delivered_by, reportingperiod)]
+
+administered$totalopat <- ave (administered$duration,administered$delivered_by,administered$reportingperiod,FUN = sum)
+
+administeredsummary <- summaryBy(count + totalopat ~ delivered_by + reportingperiod, FUN=c(max), data=administered)
+
+for (i in 1:numberperiods){
+  
+  u <- data.frame(subset(administeredsummary,reportingperiod==period[i]))
+  j <- paste("OPAT Delivery statistics per quarter",period[i],".csv")
+  write.table (u,j, sep=",", row.names=FALSE)
+}
+
+#### 9.1 We generate a spreadsheet which tells us how reasonable the assumptions underlying this spreadsheet####
 
 ##WE WANT DRUGS MISSING A START DATE, END DATE, FREE-TEXT ADVERSE EVENTS##
 missingdrugdata <- drugs
@@ -433,7 +449,7 @@ for (i in 1:numqcquarters){
 }
 
 
-####9.1 We want a Wide Summary Spreadsheet by Patient####
+#### 10.1 We want a Wide Summary Spreadsheet by Patient####
 
 ##Make Drugs Wide and keep Drug, Delivered by, Start and End, Adjusted Duration, Adverse Events##
 drug_summary <- drugs_clean
